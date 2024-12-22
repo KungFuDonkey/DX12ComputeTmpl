@@ -11,6 +11,13 @@ void ShaderDefines::AddDefineStr(LPCWSTR k, const std::wstring& v)
     defines.push_back({k, copy});
 }
 
+// usually the device with the most video memory is the best card
+// change this if you want another device
+bool IsAdapterBetter(DXGI_ADAPTER_DESC1& prevAdapter, DXGI_ADAPTER_DESC1& newAdapter)
+{
+    return prevAdapter.DedicatedVideoMemory < newAdapter.DedicatedVideoMemory;
+}
+
 DX12Env DX12Env::InitializeDX12()
 {
     // Create debugging interface
@@ -20,12 +27,27 @@ DX12Env DX12Env::InitializeDX12()
 
     ComPtr<IDXGIFactory4> factory;
     CreateDXGIFactory2(0, IID_PPV_ARGS(&factory));
-
+    
     ComPtr<IDXGIAdapter1> adapter;
     factory->EnumAdapters1(0, &adapter);
 
     DXGI_ADAPTER_DESC1 adapterDesc;
     adapter->GetDesc1(&adapterDesc);
+
+    ComPtr<IDXGIAdapter1> adapter2;
+    UINT index = 1;
+    while (SUCCEEDED(factory->EnumAdapters1(index++, &adapter2)))
+    {
+        DXGI_ADAPTER_DESC1 adapterDesc2;
+        adapter2->GetDesc1(&adapterDesc2);
+        
+        if (IsAdapterBetter(adapterDesc, adapterDesc2))
+        {
+            adapter = adapter2;
+            adapterDesc = adapterDesc2;
+        }
+    }
+    printf("Using GPU: %ls\n", adapterDesc.Description);
 
     // Create device with latest features
     ComPtr<ID3D12Device2> device;
