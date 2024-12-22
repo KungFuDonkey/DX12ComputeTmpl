@@ -1,0 +1,240 @@
+﻿#include "dx12.h"
+#include <filesystem>
+
+extern "C" { __declspec(dllexport) extern const UINT			D3D12SDKVersion = 614; }
+extern "C" { __declspec(dllexport) extern const char8_t*		D3D12SDKPath = u8".\\D3D12\\"; }
+
+void ShaderDefines::AddDefineStr(LPCWSTR k, const std::wstring& v)
+{
+    wchar_t* copy = new wchar_t[v.length() + 1];
+    wcscpy_s(copy, v.length() + 1, v.c_str());
+    defines.push_back({k, copy});
+}
+
+DX12Env DX12Env::InitializeDX12()
+{
+    // Create debugging interface
+    ComPtr<ID3D12Debug> d3d12Debug;
+    D3D12GetDebugInterface(IID_PPV_ARGS(&d3d12Debug));
+    d3d12Debug->EnableDebugLayer();
+
+    ComPtr<IDXGIFactory4> factory;
+    CreateDXGIFactory2(0, IID_PPV_ARGS(&factory));
+
+    ComPtr<IDXGIAdapter1> adapter;
+    factory->EnumAdapters1(0, &adapter);
+
+    DXGI_ADAPTER_DESC1 adapterDesc;
+    adapter->GetDesc1(&adapterDesc);
+
+    // Create device with latest features
+    ComPtr<ID3D12Device2> device;
+    D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device));
+
+    D3D12_FEATURE_DATA_D3D12_OPTIONS1 options1 = {};
+    device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &options1, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS1));
+
+    // create library
+    ComPtr<IDxcLibrary> library;
+    DxcCreateInstance(CLSID_DxcLibrary, IID_PPV_ARGS(&library));
+
+    // create compiler
+    ComPtr<IDxcCompiler> compiler;
+    DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler));
+
+    // more utils
+    ComPtr<IDxcUtils> utils;
+    DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils));
+
+    // include handler for different files
+    ComPtr<IDxcIncludeHandler> includeHandler;
+    utils->CreateDefaultIncludeHandler(&includeHandler);
+
+    D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+    queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+    queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+
+    ComPtr<ID3D12CommandQueue> commandQueue;
+    device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue));
+
+    ComPtr<ID3D12CommandAllocator> commandAllocator;
+    device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator));
+
+    ComPtr<ID3D12GraphicsCommandList> commandList;
+    device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList));
+
+
+    return DX12Env{
+        d3d12Debug,
+        factory,
+        adapter,
+        adapterDesc,
+        device,
+        options1,
+        library,
+        compiler,
+        includeHandler,
+        utils,
+        commandQueue,
+        commandAllocator,
+        commandList
+    };
+}
+
+// Util to temporarily switch cwd to Shaders
+struct ShaderPathUtil
+{
+    std::filesystem::path oldPath;
+
+    ShaderPathUtil()
+    {
+        std::filesystem::current_path(std::filesystem::current_path().append("Shaders"));
+    }
+
+    ~ShaderPathUtil()
+    {
+        std::filesystem::current_path(std::filesystem::current_path().parent_path());
+    }
+};
+
+ShaderCompilation DX12Env::CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, ShaderDefines& defines)
+{
+    // switch cwd
+    ShaderPathUtil pathUtil;
+
+    // create a code blob
+    uint32_t codePage = CP_UTF8;
+    ComPtr<IDxcBlobEncoding> sourceBlob;
+    this->library->CreateBlobFromFile(L"Shader.hlsl", &codePage, &sourceBlob);
+
+    ComPtr<IDxcOperationResult> result;
+    LPCWSTR arguments[] =
+        {
+        L"-O3",
+        L"-HV 2021",
+        L"-I /Shaders"
+        // L"-Zi",
+    };
+
+    DxcDefine* defs = defines.defines.data();
+    uint32_t numDefines = (uint32_t)defines.defines.size();
+
+    HRESULT hr = this->compiler->Compile(sourceBlob.Get(), fileName, entrypoint, L"cs_6_7", arguments, _countof(arguments), defs, numDefines, this->includeHandler.Get(), &result);
+    if (SUCCEEDED(hr))
+        result->GetStatus(&hr);
+    bool compileSuccess = SUCCEEDED(hr);
+
+    ComPtr<IDxcBlobEncoding> errorBlob;
+    if (SUCCEEDED(result->GetErrorBuffer(&errorBlob)) && errorBlob)
+    {
+        if (!compileSuccess)
+            return {
+                sourceBlob,
+                errorBlob,
+                nullptr,
+                nullptr,
+                nullptr,
+                compileSuccess
+            };
+    }
+
+    // retrieve compiled result
+    ComPtr<IDxcBlob> shaderBlob;
+    result->GetResult(&shaderBlob);
+
+    // get reflection code
+    DxcBuffer dxcBuffer { .Ptr = shaderBlob->GetBufferPointer(), .Size = shaderBlob->GetBufferSize(), .Encoding = DXC_CP_ACP };
+    ComPtr<ID3D12ShaderReflection> shaderReflection;
+    this->utils->CreateReflection(&dxcBuffer, IID_PPV_ARGS(&shaderReflection));
+
+    ComPtr<IDxcBlobEncoding> disassembleBlob;
+    this->compiler->Disassemble(shaderBlob.Get(), &disassembleBlob);
+
+    return{
+        sourceBlob,
+        errorBlob,
+        shaderReflection,
+        disassembleBlob,
+        shaderBlob,
+        compileSuccess
+    };
+}
+
+void DX12Env::SetShader(Shader& shader)
+{
+    this->commandList->SetComputeRootSignature(shader.rootSignature.Get());
+    this->commandList->SetPipelineState(shader.pso.Get());
+}
+
+void DX12Env::DispatchShader(uint32_t x, uint32_t y, uint32_t z)
+{
+    
+    this->commandList->Dispatch(x,y,z);
+}
+
+void DX12Env::FlushQueue()
+{
+    this->commandList->Close();
+
+    // Execute the list in the command queue
+    ID3D12CommandList* commandLists[] = { this->commandList.Get() };
+    this->queue->ExecuteCommandLists(_countof(commandLists), commandLists);
+
+    // Fence to wait on the gpu to finish
+    ComPtr<ID3D12Fence> fence;
+    this->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+    this->queue->Signal(fence.Get(), 1);
+
+    // Wait on the GPU
+    HANDLE handle = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    fence->SetEventOnCompletion(1, handle);
+    WaitForSingleObject(handle, INFINITE);
+}
+
+Shader ShaderCompilation::GetShader(DX12Env& dx12, ShaderCompilation& compilation)
+{
+    ComPtr<ID3D12RootSignature> rootSignature;
+    dx12.device->CreateRootSignature(0, compilation.shaderBlob->GetBufferPointer(), compilation.shaderBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature));
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = rootSignature.Get();
+    psoDesc.CS.BytecodeLength = compilation.shaderBlob->GetBufferSize();
+    psoDesc.CS.pShaderBytecode = compilation.shaderBlob->GetBufferPointer();
+
+    ComPtr<ID3D12PipelineState> pso;
+    dx12.device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pso));
+    
+    return {
+        compilation.shaderBlob,
+        rootSignature,
+        pso
+    };
+}
+
+void ShaderCompilation::PrintCompilationErrors()
+{
+    printf("Shader compile %s\n", compileSuccess ? "succeed" : "failed");
+    if (compileErrorBlob)
+    {
+        std::string message((const char*)compileErrorBlob->GetBufferPointer(), compileErrorBlob->GetBufferSize());
+        printf("%s", message.c_str());
+        printf("\n");
+    }
+}
+
+
+void ShaderCompilation::PrintDissasembly()
+{
+    UINT64 shaderRequiredFlags = this->shaderReflection->GetRequiresFlags();
+    printf("D3D_SHADER_REQUIRES_WAVE_OPS = %d\n",			(shaderRequiredFlags & D3D_SHADER_REQUIRES_WAVE_OPS) ? 1 : 0);
+    printf("D3D_SHADER_REQUIRES_DOUBLES = %d\n",			(shaderRequiredFlags & D3D_SHADER_REQUIRES_DOUBLES) ? 1 : 0);
+    printf("\n");
+
+    std::string message((const char*)disassembleBlob->GetBufferPointer(), disassembleBlob->GetBufferSize());
+    printf("%s", message.c_str());
+    printf("\n");
+}
+
+
+
+
