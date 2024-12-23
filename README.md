@@ -40,16 +40,19 @@ Shader shader = shaderCompile.GetShader(dx12, shaderCompile);
 ```
 
 ### Buffers
-The framework has 3 buffers, GPU, Upload, and Download.
+The framework has 4 buffers, GPUReadWrite, GPUConstant, Upload, and Readback.
 Creating these buffers of a specific type can be done like this:
 
 ```c++
-Buffer<float> uploadBuffer = dx12.CreateBuffer<float>(totalSize * sizeof(float) * 4, Upload);
-Buffer<float> gpuBuffer = dx12.CreateBuffer<float>(totalSize * sizeof(float) * 4, GPU);
-Buffer<float> downloadBuffer = dx12.CreateBuffer<float>(totalSize * sizeof(float) * 4, Download);
+Buffer<ConstantInput> constantUploadBuffer = dx12.CreateBuffer<ConstantInput>(1, Upload);
+Buffer<ConstantInput> constantBuffer = dx12.CreateBuffer<ConstantInput>(1, GPUConstant);
+Buffer<float> uploadBuffer = dx12.CreateBuffer<float>(totalSize * 4, Upload);
+Buffer<float> gpuBuffer = dx12.CreateBuffer<float>(totalSize * 4, GPUReadWrite);
+Buffer<float> readbackBuffer = dx12.CreateBuffer<float>(totalSize * 4, Readback);
 ```
+No need to specifically define the number of bytes you want, you just need to state the number of elements that you need.
 
-The Upload and Download buffers are buffers to export data to and from the GPU respectively, and can be accessed by the `BufferView` struct:
+The Upload and Readback buffers are buffers to export data to and from the GPU respectively, and can be accessed by the `BufferView` struct:
 
 ```c++
 BufferView<float> uploadView = dx12.GetBufferView(uploadBuffer);
@@ -62,22 +65,38 @@ To upload to the GPU you can use the `UploadBuffer` function to upload from a `U
 dx12.UploadBuffer(uploadBuffer, gpuBuffer);
 ```
 
-To download a buffer from the GPU you can use the `ReadbackBuffer` function to download from a `GPU` buffer to a `Download` buffer:
+To readback a buffer from the GPU you can use the `ReadbackBuffer` function to readback from a `GPU` buffer to a `Readback` buffer:
 
 ```c++
-dx12.DownloadBuffer(gpuBuffer, downloadBuffer);
+dx12.ReadbackBuffer(gpuBuffer, readbackBuffer);
 ```
 
 ### Execution
 A typical execution of a shader is done like this:
 
 ```c++
+// initialize shader
 dx12.SetShader(shader);
+
+// upload buffers
 dx12.UploadBuffer(uploadBuffer, gpuBuffer);
-dx12.SetBuffer(0, gpuBuffer);
+dx12.UploadBuffer(constantUploadBuffer, constantBuffer);
+
+// set buffer inputs
+dx12.SetBuffer(0, constantBuffer);
+dx12.SetBuffer(1, gpuBuffer);
+
+// dispatch the shader
 dx12.DispatchShader(threadGroupSizeX, threadGroupSizeY, threadGroupSizeZ);
-dx12.DownloadBuffer(gpuBuffer, downloadBuffer);
-dx12.FlushQueue();
+
+// add readback
+dx12.ReadbackBuffer(gpuBuffer, readbackBuffer);
+
+// execute all commands
+if (!dx12.FlushQueue())
+{
+    return -1;
+}
 ```
 
-After which, the `downloadBuffer` can be read by the CPU.
+After which (if nothing fails), the `readbackBuffer` can be read by the CPU.

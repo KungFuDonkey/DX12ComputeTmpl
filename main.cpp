@@ -70,14 +70,25 @@ int main()
 			BufferView<ConstantInput> constantView = dx12.GetBufferView(constantUploadBuffer);
 			constantView[0].divValue = 5.0f;
 		}
-		
+
+		// initialize shader
 		dx12.SetShader(shader);
+
+		// upload buffers
 		dx12.UploadBuffer(uploadBuffer, gpuBuffer);
 		dx12.UploadBuffer(constantUploadBuffer, constantBuffer);
+
+		// set buffer inputs
 		dx12.SetBuffer(0, constantBuffer);
 		dx12.SetBuffer(1, gpuBuffer);
+
+		// dispatch the shader
 		dx12.DispatchShader(threadGroupSizeX, threadGroupSizeY, threadGroupSizeZ);
+
+		// add readback
 		dx12.ReadbackBuffer(gpuBuffer, readbackBuffer);
+
+		// execute all commands
 		if (!dx12.FlushQueue())
 		{
 			return -1;
