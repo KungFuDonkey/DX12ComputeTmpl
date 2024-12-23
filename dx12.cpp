@@ -130,7 +130,7 @@ ShaderCompilation DX12Env::CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, S
     // create a code blob
     uint32_t codePage = CP_UTF8;
     ComPtr<IDxcBlobEncoding> sourceBlob;
-    library->CreateBlobFromFile(L"Shader.hlsl", &codePage, &sourceBlob);
+    library->CreateBlobFromFile(fileName, &codePage, &sourceBlob);
 
     ComPtr<IDxcOperationResult> result;
     LPCWSTR arguments[] =
