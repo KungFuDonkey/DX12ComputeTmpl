@@ -122,7 +122,7 @@ struct ShaderPathUtil
     }
 };
 
-ShaderCompilation DX12Env::CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, ShaderDefines& defines)
+ShaderCompilation DX12Env::CreateShaderCompilation(LPCWSTR fileName, LPCWSTR entrypoint, ShaderDefines& defines)
 {
     // switch cwd
     ShaderPathUtil pathUtil;
@@ -185,6 +185,20 @@ ShaderCompilation DX12Env::CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, S
     };
 }
 
+Shader DX12Env::CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, ShaderDefines& defines)
+{
+    ShaderCompilation shaderCompile = CreateShaderCompilation(L"Shader.hlsl", L"main", defines);
+
+    if (!shaderCompile.compileSuccess)
+    {
+        shaderCompile.PrintCompilationErrors();
+
+        exit(-1);
+    }
+
+    return shaderCompile.GetShader(*this);
+}
+
 void DX12Env::SetShader(Shader& shader)
 {
     commandList->SetComputeRootSignature(shader.rootSignature.Get());
@@ -239,21 +253,21 @@ bool DX12Env::FlushQueue()
     return success;
 }
 
-Shader ShaderCompilation::GetShader(DX12Env& dx12, ShaderCompilation& compilation)
+Shader ShaderCompilation::GetShader(DX12Env& dx12)
 {
     ComPtr<ID3D12RootSignature> rootSignature;
-    dx12.device->CreateRootSignature(0, compilation.shaderBlob->GetBufferPointer(), compilation.shaderBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature));
+    dx12.device->CreateRootSignature(0, shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature));
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.pRootSignature = rootSignature.Get();
-    psoDesc.CS.BytecodeLength = compilation.shaderBlob->GetBufferSize();
-    psoDesc.CS.pShaderBytecode = compilation.shaderBlob->GetBufferPointer();
+    psoDesc.CS.BytecodeLength = shaderBlob->GetBufferSize();
+    psoDesc.CS.pShaderBytecode = shaderBlob->GetBufferPointer();
 
     ComPtr<ID3D12PipelineState> pso;
     dx12.device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pso));
     
     return {
-        compilation.shaderBlob,
+        shaderBlob,
         rootSignature,
         pso
     };

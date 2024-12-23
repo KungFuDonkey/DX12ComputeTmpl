@@ -39,15 +39,7 @@ int main()
 	defines.AddDefine(L"TOTAL_SIZE_Z", totalSizeZ);
 	defines.AddDefine(L"TOTAL_SIZE", totalSize);
 	
-	ShaderCompilation shaderCompile = dx12.CompileShader(L"Shader.hlsl", L"main", defines);
-
-	if (!shaderCompile.compileSuccess)
-	{
-		shaderCompile.PrintCompilationErrors();
-		return -1;
-	}
-
-	Shader shader = shaderCompile.GetShader(dx12, shaderCompile);
+	Shader shader = dx12.CompileShader(L"Shader.hlsl", L"main", defines);
 
 	Buffer<ConstantInput> constantUploadBuffer = dx12.CreateBuffer<ConstantInput>(1, Upload);
 	Buffer<ConstantInput> constantBuffer = dx12.CreateBuffer<ConstantInput>(1, GPUConstant);
