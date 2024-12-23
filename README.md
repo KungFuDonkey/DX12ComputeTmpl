@@ -62,7 +62,7 @@ To upload to the GPU you can use the `UploadBuffer` function to upload from a `U
 dx12.UploadBuffer(uploadBuffer, gpuBuffer);
 ```
 
-To download a buffer from the GPU you can use the `DownloadBuffer` function to download from a `GPU` buffer to a `Download` buffer:
+To download a buffer from the GPU you can use the `ReadbackBuffer` function to download from a `GPU` buffer to a `Download` buffer:
 
 ```c++
 dx12.DownloadBuffer(gpuBuffer, downloadBuffer);

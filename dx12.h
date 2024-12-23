@@ -15,9 +15,10 @@ struct ShaderCompilation;
 
 enum BufferType
 {
-    GPU,
+    GPUReadWrite,
+    GPUConstant,
     Upload,
-    Download
+    Readback
 };
 
 template<typename T>
@@ -25,7 +26,7 @@ struct Buffer
 {
     ComPtr<ID3D12Resource> gpuBuffer;
     uint32_t length = 0;
-    BufferType type = BufferType::GPU;
+    BufferType type = BufferType::GPUReadWrite;
     D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
 };
 
@@ -88,6 +89,7 @@ struct DX12Env
     ComPtr<IDxcCompiler> compiler;
     ComPtr<IDxcIncludeHandler> includeHandler;
     ComPtr<IDxcUtils> utils;
+    ComPtr<ID3D12InfoQueue> infoQueue;
     ComPtr<ID3D12CommandQueue> queue;
     ComPtr<ID3D12CommandAllocator> commandAllocator;
     ComPtr<ID3D12GraphicsCommandList> commandList;
@@ -120,14 +122,18 @@ struct DX12Env
         properties.VisibleNodeMask = 0;
 
         D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
-    
-        if (type == Upload)
+
+        if (type == GPUConstant)
+        {
+            desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        }
+        else if (type == Upload)
         {
             desc.Flags = D3D12_RESOURCE_FLAG_NONE;
             properties.Type = D3D12_HEAP_TYPE_UPLOAD;
             state = D3D12_RESOURCE_STATE_COPY_SOURCE;
         }
-        else if (type == Download)
+        else if (type == Readback)
         {
             desc.Flags = D3D12_RESOURCE_FLAG_NONE;
             properties.Type = D3D12_HEAP_TYPE_READBACK;
@@ -149,7 +155,7 @@ struct DX12Env
 
     void DispatchShader(uint32_t x, uint32_t y = 1, uint32_t z = 1);
 
-    void FlushQueue();
+    bool FlushQueue();
 
     template<typename T>
     BufferView<T> GetBufferView(Buffer<T>& buffer)
@@ -165,7 +171,14 @@ struct DX12Env
     template<typename T>
     void SetBuffer(uint32_t index, Buffer<T> buffer)
     {
-        this->commandList->SetComputeRootUnorderedAccessView(index, buffer.gpuBuffer->GetGPUVirtualAddress());
+        if (buffer.type == GPUReadWrite)
+        {
+            this->commandList->SetComputeRootUnorderedAccessView(index, buffer.gpuBuffer->GetGPUVirtualAddress());
+        }
+        else if (buffer.type == GPUConstant)
+        {
+            this->commandList->SetComputeRootConstantBufferView(index, buffer.gpuBuffer->GetGPUVirtualAddress());
+        }
     }
     
     template<typename T>
@@ -186,7 +199,7 @@ struct DX12Env
     }
 
     template<typename T>
-    void BufferToUAV(Buffer<T>& buffer)
+    void BufferToReadWrite(Buffer<T>& buffer)
     {
         if (buffer.state != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
         {
@@ -220,6 +233,23 @@ struct DX12Env
     }
 
     template<typename T>
+    void BufferToConstant(Buffer<T>& buffer)
+    {
+        if (buffer.state != D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)
+        {
+            D3D12_RESOURCE_BARRIER barriers[1] = {};
+            barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barriers[0].Transition.pResource = buffer.gpuBuffer.Get();
+            barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barriers[0].Transition.StateBefore = buffer.state;
+            barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+            this->commandList->ResourceBarrier(_countof(barriers), &barriers[0]);
+
+            buffer.state = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+        }
+    }
+
+    template<typename T>
     void CopyBuffer(Buffer<T>& src, Buffer<T>& dst)
     {
         this->commandList->CopyResource(dst.gpuBuffer.Get(), src.gpuBuffer.Get());
@@ -232,31 +262,40 @@ struct DX12Env
         {
             return; // error?
         }
-        if (dst.type != GPU)
+        if (dst.type != GPUReadWrite && dst.type != GPUConstant)
         {
             return; // error?
         }
+
+        BufferType dstType = dst.type;
 
         BufferToCopyDest(dst);
         CopyBuffer(src, dst);
-        BufferToUAV(dst);
+        if (dstType == GPUReadWrite)
+        {
+            BufferToReadWrite(dst);
+        }
+        else if (dstType == GPUConstant)
+        {
+            BufferToConstant(dst);
+        }
     }
 
     template<typename T>
-    void DownloadBuffer(Buffer<T>& src, Buffer<T>& dst)
+    void ReadbackBuffer(Buffer<T>& src, Buffer<T>& dst)
     {
-        if (src.type != GPU)
+        if (src.type != GPUReadWrite)
         {
             return; // error?
         }
-        if (dst.type != Download)
+        if (dst.type != Readback)
         {
             return; // error?
         }
 
         BufferToCopySrc(src);
         CopyBuffer(src, dst);
-        BufferToUAV(src);
+        BufferToReadWrite(src);
     }
 };
 

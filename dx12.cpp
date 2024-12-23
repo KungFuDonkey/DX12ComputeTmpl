@@ -85,6 +85,8 @@ DX12Env DX12Env::InitializeDX12()
     ComPtr<ID3D12GraphicsCommandList> commandList;
     device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList));
 
+    ComPtr<ID3D12InfoQueue> infoQueue = nullptr;
+    HRESULT hr = device->QueryInterface(IID_PPV_ARGS(&infoQueue));
 
     return DX12Env{
         d3d12Debug,
@@ -97,6 +99,7 @@ DX12Env DX12Env::InitializeDX12()
         compiler,
         includeHandler,
         utils,
+        infoQueue,
         commandQueue,
         commandAllocator,
         commandList
@@ -127,7 +130,7 @@ ShaderCompilation DX12Env::CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, S
     // create a code blob
     uint32_t codePage = CP_UTF8;
     ComPtr<IDxcBlobEncoding> sourceBlob;
-    this->library->CreateBlobFromFile(L"Shader.hlsl", &codePage, &sourceBlob);
+    library->CreateBlobFromFile(L"Shader.hlsl", &codePage, &sourceBlob);
 
     ComPtr<IDxcOperationResult> result;
     LPCWSTR arguments[] =
@@ -141,7 +144,7 @@ ShaderCompilation DX12Env::CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, S
     DxcDefine* defs = defines.defines.data();
     uint32_t numDefines = (uint32_t)defines.defines.size();
 
-    HRESULT hr = this->compiler->Compile(sourceBlob.Get(), fileName, entrypoint, L"cs_6_7", arguments, _countof(arguments), defs, numDefines, this->includeHandler.Get(), &result);
+    HRESULT hr = compiler->Compile(sourceBlob.Get(), fileName, entrypoint, L"cs_6_7", arguments, _countof(arguments), defs, numDefines, includeHandler.Get(), &result);
     if (SUCCEEDED(hr))
         result->GetStatus(&hr);
     bool compileSuccess = SUCCEEDED(hr);
@@ -167,10 +170,10 @@ ShaderCompilation DX12Env::CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, S
     // get reflection code
     DxcBuffer dxcBuffer { .Ptr = shaderBlob->GetBufferPointer(), .Size = shaderBlob->GetBufferSize(), .Encoding = DXC_CP_ACP };
     ComPtr<ID3D12ShaderReflection> shaderReflection;
-    this->utils->CreateReflection(&dxcBuffer, IID_PPV_ARGS(&shaderReflection));
+    utils->CreateReflection(&dxcBuffer, IID_PPV_ARGS(&shaderReflection));
 
     ComPtr<IDxcBlobEncoding> disassembleBlob;
-    this->compiler->Disassemble(shaderBlob.Get(), &disassembleBlob);
+    compiler->Disassemble(shaderBlob.Get(), &disassembleBlob);
 
     return{
         sourceBlob,
@@ -184,33 +187,56 @@ ShaderCompilation DX12Env::CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, S
 
 void DX12Env::SetShader(Shader& shader)
 {
-    this->commandList->SetComputeRootSignature(shader.rootSignature.Get());
-    this->commandList->SetPipelineState(shader.pso.Get());
+    commandList->SetComputeRootSignature(shader.rootSignature.Get());
+    commandList->SetPipelineState(shader.pso.Get());
 }
 
 void DX12Env::DispatchShader(uint32_t x, uint32_t y, uint32_t z)
 {
-    
-    this->commandList->Dispatch(x,y,z);
+    commandList->Dispatch(x,y,z);
 }
 
-void DX12Env::FlushQueue()
+bool DX12Env::FlushQueue()
 {
-    this->commandList->Close();
+    commandList->Close();
 
     // Execute the list in the command queue
-    ID3D12CommandList* commandLists[] = { this->commandList.Get() };
-    this->queue->ExecuteCommandLists(_countof(commandLists), commandLists);
+    ID3D12CommandList* commandLists[] = { commandList.Get() };
+    queue->ExecuteCommandLists(_countof(commandLists), commandLists);
 
     // Fence to wait on the gpu to finish
     ComPtr<ID3D12Fence> fence;
-    this->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
-    this->queue->Signal(fence.Get(), 1);
+    device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+    queue->Signal(fence.Get(), 1);
 
     // Wait on the GPU
     HANDLE handle = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     fence->SetEventOnCompletion(1, handle);
     WaitForSingleObject(handle, INFINITE);
+
+    bool success = true;
+    
+    // Check for errors in the info queue
+    SIZE_T messageLength;
+    UINT i = 0;
+    while (SUCCEEDED(infoQueue->GetMessageW(i++, nullptr, &messageLength)))
+    {
+        UINT index = i - 1;
+        D3D12_MESSAGE* message = (D3D12_MESSAGE*)malloc(messageLength);
+        infoQueue->GetMessageW(index, message, &messageLength);
+            
+        if (message->Severity == D3D12_MESSAGE_SEVERITY_ERROR)
+        {
+            printf("GPU Error: %s \n", message->pDescription);
+            success = false;
+        }
+
+        free(message);
+    }
+
+    commandList->Reset(commandAllocator.Get(), nullptr);
+
+    return success;
 }
 
 Shader ShaderCompilation::GetShader(DX12Env& dx12, ShaderCompilation& compilation)
@@ -247,7 +273,7 @@ void ShaderCompilation::PrintCompilationErrors()
 
 void ShaderCompilation::PrintDissasembly()
 {
-    UINT64 shaderRequiredFlags = this->shaderReflection->GetRequiresFlags();
+    UINT64 shaderRequiredFlags = shaderReflection->GetRequiresFlags();
     printf("D3D_SHADER_REQUIRES_WAVE_OPS = %d\n",			(shaderRequiredFlags & D3D_SHADER_REQUIRES_WAVE_OPS) ? 1 : 0);
     printf("D3D_SHADER_REQUIRES_DOUBLES = %d\n",			(shaderRequiredFlags & D3D_SHADER_REQUIRES_DOUBLES) ? 1 : 0);
     printf("\n");

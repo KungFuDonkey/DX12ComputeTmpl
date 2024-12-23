@@ -1,5 +1,10 @@
 #include "dx12.h"
 
+struct ConstantInput
+{
+	float divValue;
+};
+
 int main()
 {
 	DX12Env dx12 = DX12Env::InitializeDX12();
@@ -44,9 +49,11 @@ int main()
 
 	Shader shader = shaderCompile.GetShader(dx12, shaderCompile);
 
-	Buffer<float> uploadBuffer = dx12.CreateBuffer<float>(totalSize * sizeof(float) * 4, Upload);
-	Buffer<float> gpuBuffer = dx12.CreateBuffer<float>(totalSize * sizeof(float) * 4, GPU);
-	Buffer<float> downloadBuffer = dx12.CreateBuffer<float>(totalSize * sizeof(float) * 4, Download);
+	Buffer<ConstantInput> constantUploadBuffer = dx12.CreateBuffer<ConstantInput>(1, Upload);
+	Buffer<ConstantInput> constantBuffer = dx12.CreateBuffer<ConstantInput>(1, GPUConstant);
+	Buffer<float> uploadBuffer = dx12.CreateBuffer<float>(totalSize * 4, Upload);
+	Buffer<float> gpuBuffer = dx12.CreateBuffer<float>(totalSize * 4, GPUReadWrite);
+	Buffer<float> readbackBuffer = dx12.CreateBuffer<float>(totalSize * 4, Readback);
 
 	for (int i = 0; i < 2; i++)
 	{
@@ -59,16 +66,24 @@ int main()
 				uploadView[j * 4 + 2] = 0;
 				uploadView[j * 4 + 3] = 0;
 			}
+
+			BufferView<ConstantInput> constantView = dx12.GetBufferView(constantUploadBuffer);
+			constantView[0].divValue = 5.0f;
 		}
 		
 		dx12.SetShader(shader);
 		dx12.UploadBuffer(uploadBuffer, gpuBuffer);
-		dx12.SetBuffer(0, gpuBuffer);
+		dx12.UploadBuffer(constantUploadBuffer, constantBuffer);
+		dx12.SetBuffer(0, constantBuffer);
+		dx12.SetBuffer(1, gpuBuffer);
 		dx12.DispatchShader(threadGroupSizeX, threadGroupSizeY, threadGroupSizeZ);
-		dx12.DownloadBuffer(gpuBuffer, downloadBuffer);
-		dx12.FlushQueue();
+		dx12.ReadbackBuffer(gpuBuffer, readbackBuffer);
+		if (!dx12.FlushQueue())
+		{
+			return -1;
+		}
 
-		BufferView<float> outputView = dx12.GetBufferView(downloadBuffer);
+		BufferView<float> outputView = dx12.GetBufferView(readbackBuffer);
 
 		for (int x = 0; x < 2; x++)
 			printf("uav[%d] = %.3f, %.3f, %.3f, %.3f\n", x, outputView[x * 4 + 0], outputView[x * 4 + 1], outputView[x * 4 + 2], outputView[x * 4 + 3]);

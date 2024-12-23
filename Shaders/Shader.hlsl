@@ -21,9 +21,14 @@
 #define DISPATCH_SIZE DISPATCH_SIZE_X * DISPATCH_SIZE_Y * DISPATCH_SIZE_Z
 #endif
 
-RWStructuredBuffer<float4> uav : register(u0, space0);
+cbuffer ConstantInput : register(b0)
+{
+	float divValue;
+}
 
-[RootSignature("RootFlags(0), UAV(u0)")]
+RWStructuredBuffer<float4> uav : register(u1);
+
+[RootSignature("RootFlags(0), CBV(b0, visibility=SHADER_VISIBILITY_ALL), UAV(u1)")]
 [numthreads(THREAD_GROUP_SIZE_X, THREAD_GROUP_SIZE_Y, THREAD_GROUP_SIZE_Z)]
 void main(
 	uint3 inGroupID : SV_GroupID,
@@ -33,6 +38,6 @@ void main(
 
 	float4 value = uav[dispatchThreadId];
 
-	value = float4(value.x, value.x * 2.0, value.x * 4.0, value.x * 8.0);
+	value = float4(value.x / divValue, value.x * 2.0 / divValue, value.x * 4.0 / divValue, value.x * 8.0 / divValue);
 	uav[dispatchThreadId] = value;
 }
