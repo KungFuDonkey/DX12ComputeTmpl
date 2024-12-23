@@ -98,5 +98,7 @@ if (!dx12.FlushQueue())
     return -1;
 }
 ```
-
 After which (if nothing fails), the `readbackBuffer` can be read by the CPU.
+
+### Execution failure
+If execution fails on the GPU, the error message created by dx12 will be printed to the console.
