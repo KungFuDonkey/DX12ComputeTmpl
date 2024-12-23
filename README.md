@@ -16,7 +16,7 @@ Which initializes most required dx12 structures
 The shaders in the `Shaders` folder can be compiled by the following line:
 
 ```c++
-ShaderCompilation shaderCompile = dx12.CompileShader(L"Shader.hlsl", L"main", defines);
+Shader shader = dx12.CompileShader(L"Shader.hlsl", L"main", defines);
 ```
 
 Optionally, in the `ShaderDefines` struct you can add definitions:
@@ -28,16 +28,7 @@ defines.AddDefine(L"THREAD_GROUP_SIZE_Z", threadGroupSizeZ);
 ...
 ```
 
-If compilation succeeds or fails, there are helper functions to get the final shader:
-
-```c++
-if (!shaderCompile.compileSuccess)
-{
-    shaderCompile.PrintCompilationErrors();
-    return -1; // exit
-}
-Shader shader = shaderCompile.GetShader(dx12, shaderCompile);
-```
+If compilation fails the program will terminate.
 
 ### Buffers
 The framework has 4 buffers, GPUReadWrite, GPUConstant, Upload, and Readback.

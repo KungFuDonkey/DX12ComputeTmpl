@@ -18,21 +18,9 @@ int main()
 	ShaderDefines defines;
 	defines.AddDefine(L"THREAD_GROUP_SIZE_X", threadGroupSizeX);
 	
-	ShaderCompilation initGlobalHistogramCompile = dx12.CompileShader(L"OneSweep.hlsl", L"InitGlobalHistogram", defines);
-	if (!initGlobalHistogramCompile.compileSuccess)
-	{
-		initGlobalHistogramCompile.PrintCompilationErrors();
-		return -1;
-	}
-	Shader initGlobalHistogram = initGlobalHistogramCompile.GetShader(dx12, initGlobalHistogramCompile);
-
-	ShaderCompilation scanGlobalHistogramCompile = dx12.CompileShader(L"OneSweep.hlsl", L"ScanGlobalHistogram", defines);
-	if (!scanGlobalHistogramCompile.compileSuccess)
-	{
-		scanGlobalHistogramCompile.PrintCompilationErrors();
-		return -1;
-	}
-	Shader scanGlobalHistogram = scanGlobalHistogramCompile.GetShader(dx12, scanGlobalHistogramCompile);
+	Shader initGlobalHistogram = dx12.CompileShader(L"OneSweep.hlsl", L"InitGlobalHistogram", defines);
+	Shader scanGlobalHistogram = dx12.CompileShader(L"OneSweep.hlsl", L"ScanGlobalHistogram", defines);
+	
 
 	Buffer<ConstantInput> constantUploadBuffer = dx12.CreateBuffer<ConstantInput>(1, Upload);
 	Buffer<ConstantInput> constantBuffer = dx12.CreateBuffer<ConstantInput>(1, GPUConstant);
@@ -60,7 +48,7 @@ int main()
 		}
 
 		// initialize shader
-		dx12.SetShader(shader);
+		dx12.SetShader(initGlobalHistogram);
 
 		// upload buffers
 		dx12.UploadBuffer(keysUploadBuffer, keysBuffer);

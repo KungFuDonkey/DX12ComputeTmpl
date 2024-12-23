@@ -96,7 +96,9 @@ struct DX12Env
 
     static DX12Env InitializeDX12();
 
-    ShaderCompilation CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, ShaderDefines& defines);
+    ShaderCompilation CreateShaderCompilation(LPCWSTR fileName, LPCWSTR entrypoint, ShaderDefines& defines);
+
+    Shader CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, ShaderDefines& defines);
 
     template<typename T>
     Buffer<T> CreateBuffer(uint32_t length, BufferType type)
@@ -315,7 +317,7 @@ struct ShaderCompilation
     ComPtr<IDxcBlob> shaderBlob;
     bool compileSuccess;
 
-    Shader GetShader(DX12Env& dx12, ShaderCompilation& compilation);
+    Shader GetShader(DX12Env& dx12);
 
     void PrintCompilationErrors();
     
