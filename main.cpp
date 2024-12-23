@@ -61,7 +61,18 @@ int main()
 		dx12.SetBuffer(2, valuesBuffer);
 
 		// dispatch the shader
-		dx12.DispatchShader(threadGroupSizeX, 1, 1);
+		dx12.DispatchShader(dispatchSizeX, 1, 1);
+
+		// set second shader
+		dx12.SetShader(scanGlobalHistogram);
+		
+		// set buffer inputs
+		dx12.SetBuffer(0, constantBuffer);
+		dx12.SetBuffer(1, keysBuffer);
+		dx12.SetBuffer(2, valuesBuffer);
+
+		// dispatch the shader
+		dx12.DispatchShader(4, 1, 1);
 
 		// add readback
 		dx12.ReadbackBuffer(keysBuffer, keysReadbackBuffer);
@@ -77,12 +88,18 @@ int main()
 			BufferView<UINT> keysView = dx12.GetBufferView(keysReadbackBuffer);
 			BufferView<UINT> valuesView = dx12.GetBufferView(valuesReadbackBuffer);
 
-			printf("[");
+			/*printf("[");
 			for (UINT j = 0; j < constantInput.numElements - 1; j++)
 			{
 				printf("(%i, %i), ", keysView[j], valuesView[j]);
 			}
-			printf("(%i, %i)]\n", keysView[constantInput.numElements - 1], valuesView[constantInput.numElements - 1]);
+			printf("(%i, %i)]\n", keysView[constantInput.numElements - 1], valuesView[constantInput.numElements - 1]);*/
+
+			for (UINT j = 0; j < 256; j++)
+			{
+				printf("%i ", keysView[j]);
+			}
+			printf("\n");
 		}
 	}
 	

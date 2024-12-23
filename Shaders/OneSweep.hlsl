@@ -46,7 +46,7 @@ void InitGlobalHistogram(uint3 inThreadId : SV_DispatchThreadID)
 }
 
 [RootSignature("RootFlags(0), CBV(b0, visibility=SHADER_VISIBILITY_ALL), UAV(u1), UAV(u2), UAV(u3)")]
-[numthreads(4, 1, 1)]
+[numthreads(THREAD_GROUP_SIZE_X, 1, 1)]
 void ScanGlobalHistogram(
     uint3 inGroupThreadId : SV_GroupThreadID,
     uint3 inGroupId : SV_GroupID)
@@ -67,6 +67,7 @@ void ScanGlobalHistogram(
         uint scanValue = prevScanValue + WavePrefixSum(binValue);
         prevScanValue = WaveReadLaneAt(WAVE_TRHEADS - 1, scanValue + binValue);
         globalHistogram[histogramOffset + i] = scanValue;
+
+        keys[histogramOffset + i] = scanValue;
     }
-    
 }

@@ -187,7 +187,7 @@ ShaderCompilation DX12Env::CreateShaderCompilation(LPCWSTR fileName, LPCWSTR ent
 
 Shader DX12Env::CompileShader(LPCWSTR fileName, LPCWSTR entrypoint, ShaderDefines& defines)
 {
-    ShaderCompilation shaderCompile = CreateShaderCompilation(L"Shader.hlsl", L"main", defines);
+    ShaderCompilation shaderCompile = CreateShaderCompilation(fileName, entrypoint, defines);
 
     if (!shaderCompile.compileSuccess)
     {
