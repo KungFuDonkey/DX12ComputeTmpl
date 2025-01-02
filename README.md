@@ -1,5 +1,8 @@
 # DX12ComputeTmpl
-A minimalistic template for creating Compute Shaders in DirectX12 without the exhausting setup for device, buffers, etc...
+A minimalistic template for creating Compute Shaders in DirectX12 for VS without the exhausting setup for device, buffers, etc...
+
+## Installation
+After downloading run InstallPackages.cmd (requires C# to be installed in VS for dotnet CLI) which installs the [Microsoft.Direct3D.D3D12](https://www.nuget.org/packages/Microsoft.Direct3D.D3D12/) package
 
 ## Features
 
@@ -97,3 +100,6 @@ After which (if nothing fails), the `readbackBuffer` can be read by the CPU.
 
 ### Execution failure
 If execution fails on the GPU, the error message created by dx12 will be printed to the console.
+
+### Easy target creation
+Feel free to look through the samples folder, it shows an easy way to initialize a new target for CMake
