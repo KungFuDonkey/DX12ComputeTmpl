@@ -4,9 +4,13 @@ A minimalistic template for creating Compute Shaders in DirectX12 without the ex
 ## Features
 
 ### Easy initialization
-Instantiating the environment for dx12 can be done with the following line:
+Instantiating the environment for dx12 can be done with the following lines:
 
 ```c++
+// paste this anywhere in a .cpp file
+SETUP_DX12;
+
+// run this at the start of the program
 DX12Env dx12 = DX12Env::InitializeDX12();
 ```
 
