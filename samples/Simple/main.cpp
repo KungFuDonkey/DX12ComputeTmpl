@@ -88,8 +88,11 @@ int main()
 		ReadView<float> outputView = dx12.GetReadView(gpuBuffer);
 
 		for (int x = 0; x < 2; x++)
-			printf("uav[%d] = %.3f, %.3f, %.3f, %.3f\n", x, outputView[x * 4 + 0], outputView[x * 4 + 1], outputView[x * 4 + 2], outputView[x * 4 + 3]);
-		printf("\n");
+		{
+			spdlog::info("uav[{0:d}] = {1:.3f}, {2:.3f}, {3:.3f}, {4:.3f}", x, outputView[x * 4 + 0], outputView[x * 4 + 1], outputView[x * 4 + 2], outputView[x * 4 + 3]);
+		}
+			
+		spdlog::info("");
 	}
 	
 	return 0;

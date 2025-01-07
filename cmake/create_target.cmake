@@ -12,6 +12,8 @@ function(create_target TARGET_NAME)
 
 	target_include_directories(${TARGET_NAME} PUBLIC "${CMAKE_SOURCE_DIR}/src/")
 
+	target_include_directories(${TARGET_NAME} PUBLIC "${CMAKE_SOURCE_DIR}/lib/spdlog/include")
+
 	target_link_libraries(${TARGET_NAME} d3d12.lib d3dcompiler.lib dxgi.lib dxcompiler.lib)
 
 	if (CMAKE_VERSION VERSION_GREATER 3.12)

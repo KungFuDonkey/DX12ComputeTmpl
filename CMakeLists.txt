@@ -11,6 +11,8 @@ endif()
 
 project ("DX12ComputeTmpl")
 
+add_compile_options(/utf-8)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 set(D3D12BinPath "$ENV{WindowsSdkVerBinPath}$ENV{VSCMD_ARG_TGT_ARCH}")

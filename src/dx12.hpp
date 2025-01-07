@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <filesystem>
 #include <wrl.h>
+#define SPDLOG_WCHAR_TO_UTF8_SUPPORT
+#include "spdlog/spdlog.h"
 
 // DELETE
 #include <iostream>
@@ -224,6 +226,10 @@ struct DX12Env
 
     static DX12Env InitializeDX12()
     {
+        spdlog::set_pattern("[%H:%M:%S %z] [%n] [%^---%L---%$] %v");
+        spdlog::info("Initialized Logger");
+        spdlog::info("Initializing dx12");
+
         // Create debugging interface
         ComPtr<ID3D12Debug> d3d12Debug;
         D3D12GetDebugInterface(IID_PPV_ARGS(&d3d12Debug));
@@ -251,7 +257,7 @@ struct DX12Env
                 adapterDesc = adapterDesc2;
             }
         }
-        printf("Using GPU: %ls\n", adapterDesc.Description);
+        spdlog::info(L"Using GPU: {}", adapterDesc.Description);
 
         // Create device with latest features
         ComPtr<ID3D12Device2> device;
@@ -291,6 +297,10 @@ struct DX12Env
 
         ComPtr<ID3D12InfoQueue> infoQueue = nullptr;
         HRESULT hr = device->QueryInterface(IID_PPV_ARGS(&infoQueue));
+
+        spdlog::info("Sucessfully Initialized dx12");
+        spdlog::info("");
+        spdlog::info("");
 
         return DX12Env{
             d3d12Debug,
@@ -526,7 +536,7 @@ struct DX12Env
 
             if (message->Severity == D3D12_MESSAGE_SEVERITY_ERROR)
             {
-                printf("GPU Error: %s \n", message->pDescription);
+                spdlog::error("{}", message->pDescription);
                 success = false;
             }
 
