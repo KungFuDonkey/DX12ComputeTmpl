@@ -36,45 +36,95 @@ struct ShaderPathUtil
     }
 };
 
-
-enum BufferType
+enum BufferFlags : uint32_t
 {
-    GPUReadWrite,
-    GPUConstant,
-    Upload,
-    Readback
+    CPURead = 1,
+    CPUWrite = 2,
+    GPUConstant = 4
+};
+
+BufferFlags operator|(BufferFlags x, BufferFlags y) { return (BufferFlags)((uint32_t)x | (uint32_t)y); }
+
+
+struct DX12Buffer
+{
+    ComPtr<ID3D12Resource> buffer;
+    D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
 };
 
 template<typename T>
 struct Buffer
 {
-    ComPtr<ID3D12Resource> gpuBuffer;
+    DX12Buffer gpuBuffer;
+    DX12Buffer hostUploadBuffer;
+    DX12Buffer hostReadbackBuffer;
     uint32_t length = 0;
-    BufferType type = BufferType::GPUReadWrite;
-    D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
+    BufferFlags flags = 0;
 };
 
 template<typename T>
-struct BufferView
+struct ReadView
 {
     T* data;
     uint32_t length;
     Buffer<T>* buffer;
 
-    ~BufferView()
+    bool IsClosed()
     {
-        // no support for writeback yet
-        if (buffer->type == Upload)
+        return data == nullptr;
+    }
+
+    void Close()
+    {
+        if (IsClosed())
         {
-            D3D12_RANGE range = { 0, buffer->length };
-            buffer->gpuBuffer->Unmap(0, &range);
-        }
-        else
-        {
-            buffer->gpuBuffer->Unmap(0, nullptr);
+            return;
         }
 
+        buffer->hostReadbackBuffer.buffer->Unmap(0, nullptr);
+
         data = nullptr;
+    }
+
+    ~ReadView()
+    {
+        Close();
+    }
+
+    const T& operator[](uint32_t offset) const
+    {
+        return data[offset];
+    }
+};
+
+template<typename T>
+struct WriteView
+{
+    T* data;
+    uint32_t length;
+    Buffer<T>* buffer;
+
+    bool IsClosed()
+    {
+        return data == nullptr;
+    }
+
+    void Close()
+    {
+        if (IsClosed())
+        {
+            return;
+        }
+
+        D3D12_RANGE range = { 0, buffer->length };
+        buffer->hostUploadBuffer.buffer->Unmap(0, &range);
+
+        data = nullptr;
+    }
+
+    ~WriteView()
+    {
+        Close();
     }
 
     const T& operator[](uint32_t offset) const
@@ -82,9 +132,9 @@ struct BufferView
         return data[offset];
     }
 
-    T& operator[](uint32_t index)
+    T& operator[](uint32_t offset)
     {
-        return data[index];
+        return data[offset];
     }
 };
 
@@ -338,55 +388,99 @@ struct DX12Env
     }
 
     template<typename T>
-    Buffer<T> CreateBuffer(uint32_t length, BufferType type)
+    Buffer<T> CreateBuffer(uint32_t length, BufferFlags flags)
     {
-        D3D12_RESOURCE_DESC desc = {};
-        desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-        desc.Alignment = 0;
-        desc.Width = sizeof(T) * length;
-        desc.Height = 1;
-        desc.DepthOrArraySize = 1;
-        desc.MipLevels = 1;
-        desc.Format = DXGI_FORMAT_UNKNOWN;
-        desc.SampleDesc.Count = 1;
-        desc.SampleDesc.Quality = 0;
-        desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        D3D12_RESOURCE_DESC gpuDesc = {};
+        gpuDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        gpuDesc.Alignment = 0;
+        gpuDesc.Width = sizeof(T) * length;
+        gpuDesc.Height = 1;
+        gpuDesc.DepthOrArraySize = 1;
+        gpuDesc.MipLevels = 1;
+        gpuDesc.Format = DXGI_FORMAT_UNKNOWN;
+        gpuDesc.SampleDesc.Count = 1;
+        gpuDesc.SampleDesc.Quality = 0;
+        gpuDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        gpuDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     
-        D3D12_HEAP_PROPERTIES properties = {};
-        properties.Type = D3D12_HEAP_TYPE_DEFAULT;
-        properties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-        properties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-        properties.CreationNodeMask = 0;
-        properties.VisibleNodeMask = 0;
+        D3D12_HEAP_PROPERTIES gpuProperties = {};
+        gpuProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+        gpuProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+        gpuProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+        gpuProperties.CreationNodeMask = 0;
+        gpuProperties.VisibleNodeMask = 0;
 
-        D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES gpuState = D3D12_RESOURCE_STATE_COMMON;
 
-        if (type == GPUConstant)
+        if (flags & GPUConstant)
         {
-            desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+            gpuDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
         }
-        else if (type == Upload)
-        {
-            desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-            properties.Type = D3D12_HEAP_TYPE_UPLOAD;
-            state = D3D12_RESOURCE_STATE_COPY_SOURCE;
-        }
-        else if (type == Readback)
-        {
-            desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-            properties.Type = D3D12_HEAP_TYPE_READBACK;
-            state = D3D12_RESOURCE_STATE_COPY_DEST;
-        }
-    
+
         ComPtr<ID3D12Resource> mGPUResource;
-        this->device->CreateCommittedResource(&properties, D3D12_HEAP_FLAG_NONE, &desc, state, nullptr, IID_PPV_ARGS(&mGPUResource));
+        this->device->CreateCommittedResource(&gpuProperties, D3D12_HEAP_FLAG_NONE, &gpuDesc, gpuState, nullptr, IID_PPV_ARGS(&mGPUResource));
 
+        D3D12_RESOURCE_STATES hostUploadState = D3D12_RESOURCE_STATE_COPY_SOURCE;
+        D3D12_RESOURCE_STATES hostReadbackState = D3D12_RESOURCE_STATE_COPY_DEST;
+        ComPtr<ID3D12Resource> mHostUploadResource;
+        ComPtr<ID3D12Resource> mHostReadbackResource;
+
+        if (flags & CPUWrite)
+        {
+            D3D12_RESOURCE_DESC cpuDesc = {};
+            cpuDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            cpuDesc.Alignment = 0;
+            cpuDesc.Width = sizeof(T) * length;
+            cpuDesc.Height = 1;
+            cpuDesc.DepthOrArraySize = 1;
+            cpuDesc.MipLevels = 1;
+            cpuDesc.Format = DXGI_FORMAT_UNKNOWN;
+            cpuDesc.SampleDesc.Count = 1;
+            cpuDesc.SampleDesc.Quality = 0;
+            cpuDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            cpuDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+            D3D12_HEAP_PROPERTIES cpuProperties = {};
+            cpuProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
+            cpuProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+            cpuProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+            cpuProperties.CreationNodeMask = 0;
+            cpuProperties.VisibleNodeMask = 0;
+
+            this->device->CreateCommittedResource(&cpuProperties, D3D12_HEAP_FLAG_NONE, &cpuDesc, hostUploadState, nullptr, IID_PPV_ARGS(&mHostUploadResource));
+        }    
+
+        if (flags & CPURead)
+        {
+            D3D12_RESOURCE_DESC cpuDesc = {};
+            cpuDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            cpuDesc.Alignment = 0;
+            cpuDesc.Width = sizeof(T) * length;
+            cpuDesc.Height = 1;
+            cpuDesc.DepthOrArraySize = 1;
+            cpuDesc.MipLevels = 1;
+            cpuDesc.Format = DXGI_FORMAT_UNKNOWN;
+            cpuDesc.SampleDesc.Count = 1;
+            cpuDesc.SampleDesc.Quality = 0;
+            cpuDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            cpuDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+            D3D12_HEAP_PROPERTIES cpuProperties = {};
+            cpuProperties.Type = D3D12_HEAP_TYPE_READBACK;
+            cpuProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+            cpuProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+            cpuProperties.CreationNodeMask = 0;
+            cpuProperties.VisibleNodeMask = 0;
+
+            this->device->CreateCommittedResource(&cpuProperties, D3D12_HEAP_FLAG_NONE, &cpuDesc, hostReadbackState, nullptr, IID_PPV_ARGS(&mHostReadbackResource));
+        }
+        
         return {
-            mGPUResource,
+            { mGPUResource, gpuState },
+            { mHostUploadResource, hostUploadState },
+            { mHostReadbackResource, hostReadbackState },
             length,
-            type,
-            state
+            flags,
         };
     }
 
@@ -445,37 +539,54 @@ struct DX12Env
     }
 
     template<typename T>
-    BufferView<T> GetBufferView(Buffer<T>& buffer)
+    ReadView<T> GetReadView(Buffer<T>& buffer)
     {
         T* data = nullptr;
-        D3D12_RANGE range = { 0, buffer.length };
 
-        buffer.gpuBuffer->Map(0, &range, reinterpret_cast<void**>(&data));
-        
+        if (buffer.flags & CPURead)
+        {
+            D3D12_RANGE range = { 0, buffer.length };
+
+            buffer.hostReadbackBuffer.buffer->Map(0, &range, reinterpret_cast<void**>(&data));
+        }
+
         return { data, buffer.length, &buffer };
     }
 
     template<typename T>
-    void SetBuffer(uint32_t index, Buffer<T> buffer)
+    WriteView<T> GetWriteView(Buffer<T>& buffer)
     {
-        if (buffer.type == GPUReadWrite)
+        T* data = nullptr;
+
+        if (buffer.flags & CPUWrite)
         {
-            this->commandList->SetComputeRootUnorderedAccessView(index, buffer.gpuBuffer->GetGPUVirtualAddress());
+            D3D12_RANGE range = { 0, buffer.length };
+
+            buffer.hostUploadBuffer.buffer->Map(0, &range, reinterpret_cast<void**>(&data));
         }
-        else if (buffer.type == GPUConstant)
+        return { data, buffer.length, &buffer };
+    }
+
+    template<typename T>
+    void SetBuffer(uint32_t index, Buffer<T>& buffer)
+    {
+        if (buffer.flags & GPUConstant)
         {
-            this->commandList->SetComputeRootConstantBufferView(index, buffer.gpuBuffer->GetGPUVirtualAddress());
+            this->commandList->SetComputeRootConstantBufferView(index, buffer.gpuBuffer.buffer->GetGPUVirtualAddress());
+        }
+        else
+        {
+            this->commandList->SetComputeRootUnorderedAccessView(index, buffer.gpuBuffer.buffer->GetGPUVirtualAddress());
         }
     }
     
-    template<typename T>
-    void BufferToCopySrc(Buffer<T>& buffer)
+    void BufferToCopySrc(DX12Buffer& buffer)
     {
         if (buffer.state != D3D12_RESOURCE_STATE_COPY_SOURCE)
         {
             D3D12_RESOURCE_BARRIER barriers[1] = {};
             barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            barriers[0].Transition.pResource = buffer.gpuBuffer.Get();
+            barriers[0].Transition.pResource = buffer.buffer.Get();
             barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             barriers[0].Transition.StateBefore = buffer.state;
             barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
@@ -485,14 +596,13 @@ struct DX12Env
         }
     }
 
-    template<typename T>
-    void BufferToReadWrite(Buffer<T>& buffer)
+    void BufferToReadWrite(DX12Buffer& buffer)
     {
         if (buffer.state != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
         {
             D3D12_RESOURCE_BARRIER barriers[1] = {};
             barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            barriers[0].Transition.pResource = buffer.gpuBuffer.Get();
+            barriers[0].Transition.pResource = buffer.buffer.Get();
             barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             barriers[0].Transition.StateBefore = buffer.state;
             barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
@@ -502,14 +612,13 @@ struct DX12Env
         }
     }
 
-    template<typename T>
-    void BufferToCopyDest(Buffer<T>& buffer)
+    void BufferToCopyDest(DX12Buffer& buffer)
     {
         if (buffer.state != D3D12_RESOURCE_STATE_COPY_DEST)
         {
             D3D12_RESOURCE_BARRIER barriers[1] = {};
             barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            barriers[0].Transition.pResource = buffer.gpuBuffer.Get();
+            barriers[0].Transition.pResource = buffer.buffer.Get();
             barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             barriers[0].Transition.StateBefore = buffer.state;
             barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
@@ -519,14 +628,13 @@ struct DX12Env
         }
     }
 
-    template<typename T>
-    void BufferToConstant(Buffer<T>& buffer)
+    void BufferToConstant(DX12Buffer& buffer)
     {
         if (buffer.state != D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)
         {
             D3D12_RESOURCE_BARRIER barriers[1] = {};
             barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            barriers[0].Transition.pResource = buffer.gpuBuffer.Get();
+            barriers[0].Transition.pResource = buffer.buffer.Get();
             barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             barriers[0].Transition.StateBefore = buffer.state;
             barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
@@ -537,52 +645,51 @@ struct DX12Env
     }
 
     template<typename T>
-    void CopyBuffer(Buffer<T>& src, Buffer<T>& dst)
+    void UploadBuffer(Buffer<T>& buffer)
     {
-        this->commandList->CopyResource(dst.gpuBuffer.Get(), src.gpuBuffer.Get());
-    }
-
-    template<typename T>
-    void UploadBuffer(Buffer<T>& src, Buffer<T>& dst)
-    {
-        if (src.type != Upload)
-        {
-            return; // error?
-        }
-        if (dst.type != GPUReadWrite && dst.type != GPUConstant)
+        if ((buffer.flags & CPUWrite) == 0)
         {
             return; // error?
         }
 
-        BufferType dstType = dst.type;
+        BufferToCopySrc(buffer.hostUploadBuffer);
+        BufferToCopyDest(buffer.gpuBuffer);
 
-        BufferToCopyDest(dst);
-        CopyBuffer(src, dst);
-        if (dstType == GPUReadWrite)
+        this->commandList->CopyResource(buffer.gpuBuffer.buffer.Get(), buffer.hostUploadBuffer.buffer.Get());
+
+        // setup for use, not necessarily will upload again
+        if (buffer.flags & GPUConstant)
         {
-            BufferToReadWrite(dst);
+            BufferToConstant(buffer.gpuBuffer);
         }
-        else if (dstType == GPUConstant)
+        else
         {
-            BufferToConstant(dst);
+            BufferToReadWrite(buffer.gpuBuffer);
         }
     }
 
     template<typename T>
-    void ReadbackBuffer(Buffer<T>& src, Buffer<T>& dst)
+    void ReadbackBuffer(Buffer<T>& buffer)
     {
-        if (src.type != GPUReadWrite)
-        {
-            return; // error?
-        }
-        if (dst.type != Readback)
+        if ((buffer.flags & CPURead) == 0)
         {
             return; // error?
         }
 
-        BufferToCopySrc(src);
-        CopyBuffer(src, dst);
-        BufferToReadWrite(src);
+        BufferToCopySrc(buffer.gpuBuffer);
+        BufferToCopyDest(buffer.hostReadbackBuffer);
+
+        this->commandList->CopyResource(buffer.hostReadbackBuffer.buffer.Get(), buffer.gpuBuffer.buffer.Get());
+
+        // setup for reuse, not necessarily will upload again
+        if (buffer.flags & GPUConstant)
+        {
+            BufferToConstant(buffer.gpuBuffer);
+        }
+        else
+        {
+            BufferToReadWrite(buffer.gpuBuffer);
+        }
     }
 };
 

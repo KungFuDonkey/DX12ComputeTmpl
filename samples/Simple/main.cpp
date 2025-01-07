@@ -43,34 +43,31 @@ int main()
 	
 	Shader shader = dx12.CompileShader(L"Shader.hlsl", L"main", defines);
 
-	Buffer<ConstantInput> constantUploadBuffer = dx12.CreateBuffer<ConstantInput>(1, Upload);
-	Buffer<ConstantInput> constantBuffer = dx12.CreateBuffer<ConstantInput>(1, GPUConstant);
-	Buffer<float> uploadBuffer = dx12.CreateBuffer<float>(totalSize * 4, Upload);
-	Buffer<float> gpuBuffer = dx12.CreateBuffer<float>(totalSize * 4, GPUReadWrite);
-	Buffer<float> readbackBuffer = dx12.CreateBuffer<float>(totalSize * 4, Readback);
+	Buffer<ConstantInput> constantBuffer = dx12.CreateBuffer<ConstantInput>(1, GPUConstant | CPUWrite);
+	Buffer<float> gpuBuffer = dx12.CreateBuffer<float>(totalSize * 4, CPURead | CPUWrite);
 
 	for (int i = 0; i < 2; i++)
 	{
+		WriteView<float> gpuBufferView = dx12.GetWriteView(gpuBuffer);
+		for (int j = 0; j < totalSize; j++)
 		{
-			BufferView<float> uploadView = dx12.GetBufferView(uploadBuffer);
-			for (int j = 0; j < totalSize * sizeof(float); j++)
-			{
-				uploadView[j * 4] = (float)(j * (i + 1));
-				uploadView[j * 4 + 1] = 0;
-				uploadView[j * 4 + 2] = 0;
-				uploadView[j * 4 + 3] = 0;
-			}
-
-			BufferView<ConstantInput> constantView = dx12.GetBufferView(constantUploadBuffer);
-			constantView[0].divValue = 5.0f;
+			gpuBufferView[j * 4] = (float)(j * (i + 1));
+			gpuBufferView[j * 4 + 1] = 0;
+			gpuBufferView[j * 4 + 2] = 0;
+			gpuBufferView[j * 4 + 3] = 0;
 		}
+		gpuBufferView.Close();
+
+		WriteView<ConstantInput> constantView = dx12.GetWriteView(constantBuffer);
+		constantView[0].divValue = 5.0f;
+		constantView.Close();
 
 		// initialize shader
 		dx12.SetShader(shader);
 
 		// upload buffers
-		dx12.UploadBuffer(uploadBuffer, gpuBuffer);
-		dx12.UploadBuffer(constantUploadBuffer, constantBuffer);
+		dx12.UploadBuffer(gpuBuffer);
+		dx12.UploadBuffer(constantBuffer);
 
 		// set buffer inputs
 		dx12.SetBuffer(0, constantBuffer);
@@ -80,7 +77,7 @@ int main()
 		dx12.DispatchShader(threadGroupSizeX, threadGroupSizeY, threadGroupSizeZ);
 
 		// add readback
-		dx12.ReadbackBuffer(gpuBuffer, readbackBuffer);
+		dx12.ReadbackBuffer(gpuBuffer);
 
 		// execute all commands
 		if (!dx12.FlushQueue())
@@ -88,7 +85,7 @@ int main()
 			return -1;
 		}
 
-		BufferView<float> outputView = dx12.GetBufferView(readbackBuffer);
+		ReadView<float> outputView = dx12.GetReadView(gpuBuffer);
 
 		for (int x = 0; x < 2; x++)
 			printf("uav[%d] = %.3f, %.3f, %.3f, %.3f\n", x, outputView[x * 4 + 0], outputView[x * 4 + 1], outputView[x * 4 + 2], outputView[x * 4 + 3]);
