@@ -18,7 +18,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 set(D3D12BinPath "$ENV{WindowsSdkVerBinPath}$ENV{VSCMD_ARG_TGT_ARCH}")
 set(D3D12CompilerDLL "${CMAKE_SOURCE_DIR}\\InstallPackages\\dxcompiler.dll")
 set(D3D12DXILDLL "${CMAKE_SOURCE_DIR}\\InstallPackages\\dxil.dll")
-set(D3D12SDKPath "$ENV{USERPROFILE}\\.nuget\\packages\\microsoft.direct3d.d3d12\\1.614.1\\build\\native\\bin\\x64")	    
+set(D3D12SDKPath "$ENV{USERPROFILE}\\.nuget\\packages\\microsoft.direct3d.d3d12\\1.614.1\\build\\native\\bin\\x64")	 
 
 # Include sub-projects.
 add_subdirectory ("samples")
